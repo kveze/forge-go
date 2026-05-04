@@ -3,18 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
-	"mime/multipart"
-	"encoding/base64"
 )
 
 // ==================== СТРУКТУРЫ ====================
@@ -113,6 +113,59 @@ type LooksMaxTipResponse struct {
 	Category string   `json:"category"`
 }
 
+type LooksMaxAnalyzeRequest struct {
+	ImageBase64 string `json:"image_base64"`
+	Age         int    `json:"age"`
+	Gender      string `json:"gender"`
+	Goal        string `json:"goal"`
+}
+
+type LooksMaxAnalyzeResponse struct {
+	Tips     []string `json:"tips"`
+	Priority string   `json:"priority"`
+	Category string   `json:"category"`
+}
+
+type LooksMaxTransformRequest struct {
+	ImageBase64 string   `json:"image_base64"`
+	Tips        []string `json:"tips"`
+	Gender      string   `json:"gender"`
+}
+
+type LooksMaxTransformResponse struct {
+	ImageBase64 string `json:"image_base64"`
+}
+
+// Gemini
+type GeminiPart struct {
+	Text       string            `json:"text,omitempty"`
+	InlineData *GeminiInlineData `json:"inline_data,omitempty"`
+}
+
+type GeminiInlineData struct {
+	MimeType string `json:"mime_type"`
+	Data     string `json:"data"`
+}
+
+type GeminiContent struct {
+	Parts []GeminiPart `json:"parts"`
+}
+
+type GeminiRequest struct {
+	Contents          []GeminiContent `json:"contents"`
+	SystemInstruction *GeminiContent  `json:"system_instruction,omitempty"`
+}
+
+type GeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+}
+
 // ==================== RATE LIMITER ====================
 
 type RateLimiter struct {
@@ -159,22 +212,21 @@ var (
 	httpClient  *http.Client
 	rateLimiter *RateLimiter
 	apiKey      string
+	openaiKey   string
 )
 
-
-var openaiKey string
 // ==================== MIDDLEWARE ====================
 
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 
-allowedOrigins := []string{
-    "https://forge-client-main.netlify.app",
-    "http://localhost:5173",
-    "http://localhost:5174", // ← добавь
-    "http://localhost:3000",
-}
+		allowedOrigins := []string{
+			"https://forge-client-main.netlify.app",
+			"http://localhost:5173",
+			"http://localhost:5174",
+			"http://localhost:3000",
+		}
 
 		allowed := false
 		for _, o := range allowedOrigins {
@@ -260,11 +312,6 @@ func askAI(prompt string, systemPrompt string) (string, error) {
 	if apiKey == "" {
 		return "", fmt.Errorf("API ключ не настроен")
 	}
-
-	openaiKey = os.Getenv("OPENAI_KEY")
-if openaiKey == "" {
-    log.Fatal("❌ OPENAI_KEY не установлен")
-}
 
 	reqBody := OpenRouterRequest{
 		Model: "openai/gpt-4o-mini",
@@ -579,27 +626,25 @@ func looksMaxTipHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// До 18 — хардкод, AI не вызываем
 	if req.Age < 18 {
 		allTips := []string{
 			"База которую все игнорируют: умывайся утром и вечером. Просто вода и пенка — кожа уже другая через неделю.",
 			"Самое важное что никто не делает: не дери прыщи. Серьёзно. Один содранный прыщ = шрам на месяцы.",
 			"Чинтакс качай каждый день — жуй жвачку по 10-15 минут. Жевательная мышца лепит нижнюю челюсть визуально.",
 			"Умывайся 2 раза в день и не трогай лицо руками. Руки переносят бактерии — это буквально причина половины прыщей.",
-			"Бро, looksmax это не твоё пока. Сейчас одна задача — вырасти. Ложись до 23:00, вставай в 7-8 — гормон роста пикует именно в первые 2 часа после засыпания.",
-			"Слушай, heightmax сейчас реально важнее всего. Не сутулься — ты буквально теряешь 3-5 см просто так, это мышечный дисбаланс а не судьба.",
-			"Про лицо успеешь, не спеши. Белок 2г/кг каждый день — аминокислоты это буквально строительный материал для костей, без этого рост встаёт.",
-			"Looksmax подождёт, честно. Вредностей и вкусностей меньше — резкий инсулин глушит соматотропин, это гормон который тебя и растит.",
-			"Ты ещё растёшь, это главное преимущество. Цинк + магний перед сном — они участвуют в синтезе тестостерона и гормона роста, стоит копейки.",
-			"Heightmax mode, всё остальное потом. Молоко каждый день — IGF-1 из молока напрямую стимулирует рост костей, это не реклама это физиология.",
-			"Не заморачивайся пока на внешку. Спи в тёмной комнате и без телефона за 30 минут до сна — мелатонин запускает выброс гормона роста, синий свет это глушит.",
-			"Не пей много воды перед сном — это может нарушить сон и снизить качество восстановления, а тебе сейчас важно максимально качественно восстанавливаться ночью.",
-			"Солнце — это не только витамин D, но и сигнал для организма что день начался. 15-20 минут на солнце утром помогут тебе проснуться и запустить гормон роста.",
-			"Не пропускай завтрак — это запускает метаболизм и даёт энергию для роста. Омлет с овощами или овсянка с фруктами — отличный старт дня.",
-			"Избегай стрессов — хронический стресс повышает кортизол, который может подавлять рост. Найди хобби или занятие для релаксации, это важно для твоего развития.",
-			"Питайся разнообразно — витамины и минералы из разных продуктов",
-			"Не сравнивай себя с другими — каждый растёт в своём темпе, фокусируйся на своём прогрессе и здоровье.",
-			
+			"Bro, looksmax это не твоё пока. Сейчас одна задача — вырасти. Ложись до 23:00, вставай в 7-8.",
+			"Слушай, heightmax сейчас реально важнее всего. Не сутулься — ты буквально теряешь 3-5 см просто так.",
+			"Про лицо успеешь, не спеши. Белок 2г/кг каждый день — строительный материал для костей.",
+			"Looksmax подождёт. Вредностей меньше — резкий инсулин глушит соматотропин.",
+			"Ты ещё растёшь, это главное преимущество. Цинк + магний перед сном.",
+			"Heightmax mode, всё остальное потом. Молоко каждый день — IGF-1 стимулирует рост костей.",
+			"Спи в тёмной комнате и без телефона за 30 минут до сна — мелатонин запускает выброс гормона роста.",
+			"Не пей много воды перед сном — нарушает качество восстановления.",
+			"Солнце утром 15-20 минут — запускает метаболизм и гормон роста.",
+			"Не пропускай завтрак — омлет или овсянка с фруктами.",
+			"Избегай стрессов — хронический стресс повышает кортизол, подавляет рост.",
+			"Питайся разнообразно — витамины и минералы из разных продуктов.",
+			"Не сравнивай себя с другими — каждый растёт в своём темпе.",
 		}
 
 		n := int64(len(allTips))
@@ -614,7 +659,6 @@ func looksMaxTipHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 18+ — AI
 	bmi := float64(req.Weight) / math.Pow(float64(req.Height)/100, 2)
 	bmiStr := fmt.Sprintf("%.1f", bmi)
 
@@ -667,7 +711,6 @@ func looksMaxTipHandler(w http.ResponseWriter, r *http.Request) {
 	cleaned = strings.TrimSuffix(cleaned, "```")
 	cleaned = strings.TrimSpace(cleaned)
 
-	// AI возвращает один совет — парсим во временную структуру
 	var aiResp struct {
 		Tip      string `json:"tip"`
 		Priority string `json:"priority"`
@@ -686,301 +729,217 @@ func looksMaxTipHandler(w http.ResponseWriter, r *http.Request) {
 	}}, http.StatusOK)
 }
 
-type LooksMaxAnalyzeRequest struct {
-    ImageBase64 string `json:"image_base64"` // base64 фото
-    Age         int    `json:"age"`
-    Gender      string `json:"gender"`
-    Goal        string `json:"goal"`
-}
-
-type LooksMaxAnalyzeResponse struct {
-    Tips     []string `json:"tips"`
-    Priority string   `json:"priority"`
-    Category string   `json:"category"`
-}
+// ==================== LOOKSMAX ANALYZE ====================
 
 func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        sendError(w, "Только POST запросы", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodPost {
+		sendError(w, "Только POST запросы", http.StatusMethodNotAllowed)
+		return
+	}
 
+	var req LooksMaxAnalyzeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "Неверный формат данных", http.StatusBadRequest)
+		return
+	}
 
-
-    var req LooksMaxAnalyzeRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        sendError(w, "Неверный формат данных", http.StatusBadRequest)
-        return
-    }
-
-    if req.ImageBase64 == "" {
-        sendError(w, "Нет фото", http.StatusBadRequest)
-        return
-    }
+	if req.ImageBase64 == "" {
+		sendError(w, "Нет фото", http.StatusBadRequest)
+		return
+	}
 
 	log.Printf("LooksMax Analyze: age=%d gender=%s imageLen=%d", req.Age, req.Gender, len(req.ImageBase64))
 
-		if len(req.ImageBase64) > 7*1024*1024 { // ~5MB в base64
-    sendError(w, "Фото слишком большое", http.StatusBadRequest)
-    return
+	if len(req.ImageBase64) > 7*1024*1024 {
+		sendError(w, "Фото слишком большое", http.StatusBadRequest)
+		return
 	}
 
 	imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
-if err != nil {
-    sendError(w, "Некорректное фото", http.StatusBadRequest)
-    return
-}
+	if err != nil {
+		sendError(w, "Некорректное фото", http.StatusBadRequest)
+		return
+	}
 
-isJPEG := len(imgBytes) > 2 && imgBytes[0] == 0xFF && imgBytes[1] == 0xD8
-isPNG  := len(imgBytes) > 4 && string(imgBytes[1:4]) == "PNG"
-isWEBP := len(imgBytes) > 12 && string(imgBytes[8:12]) == "WEBP"
+	mimeType := "image/jpeg"
+	isJPEG := len(imgBytes) > 2 && imgBytes[0] == 0xFF && imgBytes[1] == 0xD8
+	isPNG := len(imgBytes) > 4 && string(imgBytes[1:4]) == "PNG"
+	isWEBP := len(imgBytes) > 12 && string(imgBytes[8:12]) == "WEBP"
 
-if !isJPEG && !isPNG && !isWEBP {
-    sendError(w, "Поддерживаются только JPEG, PNG, WEBP", http.StatusBadRequest)
-    return
-}
-}
+	if !isJPEG && !isPNG && !isWEBP {
+		sendError(w, "Поддерживаются только JPEG, PNG, WEBP", http.StatusBadRequest)
+		return
+	}
+	if isPNG {
+		mimeType = "image/png"
+	} else if isWEBP {
+		mimeType = "image/webp"
+	}
 
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+	if geminiKey == "" {
+		sendError(w, "Gemini API ключ не настроен", http.StatusInternalServerError)
+		return
+	}
 
-
-type GeminiPart struct {
-	Text       string            `json:"text,omitempty"`
-	InlineData *GeminiInlineData `json:"inline_data,omitempty"`
-}
- 
-type GeminiInlineData struct {
-	MimeType string `json:"mime_type"`
-	Data     string `json:"data"`
-}
- 
-type GeminiContent struct {
-	Parts []GeminiPart `json:"parts"`
-}
- 
-type GeminiRequest struct {
-	Contents         []GeminiContent  `json:"contents"`
-	SystemInstruction *GeminiContent  `json:"system_instruction,omitempty"`
-}
- 
-type GeminiResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
-}
- 
-// --- использование ---
- 
-geminiKey := os.Getenv("GEMINI_API_KEY")
- 
-systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
+	systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
 Анализируй лицо на фото и давай конкретные советы.
 Стиль: прямой, как друг который реально шарит. Без воды.
 Если лица нет — верни: {"error": "no_face"}
 Если лицо есть — дай 3 конкретных looksmax совета.
 Верни ТОЛЬКО JSON без markdown: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
- 
-userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.`, req.Age, req.Gender, req.Goal)
- 
-geminiReq := GeminiRequest{
-	SystemInstruction: &GeminiContent{
-		Parts: []GeminiPart{
-			{Text: systemText},
+
+	userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.`,
+		req.Age, req.Gender, req.Goal)
+
+	geminiReq := GeminiRequest{
+		SystemInstruction: &GeminiContent{
+			Parts: []GeminiPart{{Text: systemText}},
 		},
-	},
-	Contents: []GeminiContent{
-		{
-			Parts: []GeminiPart{
-				{Text: userText},
-				{
-					InlineData: &GeminiInlineData{
-						MimeType: "image/jpeg",
-						Data:     req.ImageBase64, // чистый base64 без префикса
+		Contents: []GeminiContent{
+			{
+				Parts: []GeminiPart{
+					{Text: userText},
+					{
+						InlineData: &GeminiInlineData{
+							MimeType: mimeType,
+							Data:     req.ImageBase64,
+						},
 					},
 				},
 			},
 		},
-	},
-}
- 
-jsonBody, _ := json.Marshal(geminiReq)
- 
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-defer cancel()
- 
-url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + geminiKey
- 
-httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-httpReq.Header.Set("Content-Type", "application/json")
- 
-client := &http.Client{}
-resp, err := client.Do(httpReq)
-if err != nil {
-	c.JSON(500, gin.H{"error": err.Error()})
-	return
-}
-defer resp.Body.Close()
- 
-var geminiResp GeminiResponse
-if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
-	c.JSON(500, gin.H{"error": "decode error"})
-	return
-}
- 
-if len(geminiResp.Candidates) == 0 {
-	c.JSON(500, gin.H{"error": "no candidates"})
-	return
-}
- 
-rawText := geminiResp.Candidates[0].Content.Parts[0].Text
- 
-// Gemini иногда оборачивает в ```json ... ``` — чистим
-rawText = strings.TrimSpace(rawText)
-rawText = strings.TrimPrefix(rawText, "```json")
-rawText = strings.TrimPrefix(rawText, "```")
-rawText = strings.TrimSuffix(rawText, "```")
-rawText = strings.TrimSpace(rawText)
- 
-var result map[string]interface{}
-if err := json.Unmarshal([]byte(rawText), &result); err != nil {
-	c.JSON(500, gin.H{"error": "json parse error", "raw": rawText})
-	return
-}
- 
-// Проверка на no_face
-if errMsg, ok := result["error"]; ok {
-	c.JSON(200, gin.H{"success": false, "error": errMsg})
-	return
-}
- 
-c.JSON(200, gin.H{"success": true, "data": result})
-    resp, err := httpClient.Do(httpReq)
-    if err != nil {
-        sendError(w, "Ошибка запроса к AI: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer resp.Body.Close()
+	}
 
-    body, _ := io.ReadAll(resp.Body)
+	jsonBody, _ := json.Marshal(geminiReq)
 
-    var result OpenRouterResponse // та же структура что и для OpenRouter
-    if err := json.Unmarshal(body, &result); err != nil || len(result.Choices) == 0 {
-        sendError(w, "Ошибка парсинга ответа AI", http.StatusInternalServerError)
-        return
-    }
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    content := result.Choices[0].Message.Content
-    cleaned := strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(strings.TrimPrefix(content, "```json"), "```"), "```"))
+	geminiURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + geminiKey
 
-    var errorCheck struct {
-        Error string `json:"error"`
-    }
-    if json.Unmarshal([]byte(cleaned), &errorCheck) == nil && errorCheck.Error == "no_face" {
-        sendError(w, "На фото не обнаружено лицо человека", http.StatusBadRequest)
-        return
-    }
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", geminiURL, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		sendError(w, "Ошибка создания запроса", http.StatusInternalServerError)
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 
-    var analysis LooksMaxAnalyzeResponse
-    if err := json.Unmarshal([]byte(cleaned), &analysis); err != nil {
-        sendError(w, "Ошибка формата ответа", http.StatusInternalServerError)
-        return
-    }
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		sendError(w, "Ошибка запроса к Gemini: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
 
-    sendJSON(w, APIResponse{Success: true, Data: analysis}, http.StatusOK)
+	var geminiResp GeminiResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+		sendError(w, "Ошибка декодирования ответа Gemini", http.StatusInternalServerError)
+		return
+	}
+
+	if len(geminiResp.Candidates) == 0 {
+		sendError(w, "Gemini не вернул ответ", http.StatusInternalServerError)
+		return
+	}
+
+	rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+	rawText = strings.TrimSpace(rawText)
+	rawText = strings.TrimPrefix(rawText, "```json")
+	rawText = strings.TrimPrefix(rawText, "```")
+	rawText = strings.TrimSuffix(rawText, "```")
+	rawText = strings.TrimSpace(rawText)
+
+	var errorCheck struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal([]byte(rawText), &errorCheck) == nil && errorCheck.Error == "no_face" {
+		sendError(w, "На фото не обнаружено лицо человека", http.StatusBadRequest)
+		return
+	}
+
+	var analysis LooksMaxAnalyzeResponse
+	if err := json.Unmarshal([]byte(rawText), &analysis); err != nil {
+		log.Printf("LooksMax JSON Parse Error: %v, raw: %s", err, rawText)
+		sendError(w, "Ошибка формата ответа", http.StatusInternalServerError)
+		return
+	}
+
+	sendJSON(w, APIResponse{Success: true, Data: analysis}, http.StatusOK)
 }
 
 // ==================== LOOKSMAX TRANSFORM ====================
 
-type LooksMaxTransformRequest struct {
-    ImageBase64 string   `json:"image_base64"`
-    Tips        []string `json:"tips"`
-    Gender      string   `json:"gender"`
-}
-
-type LooksMaxTransformResponse struct {
-    ImageBase64 string `json:"image_base64"`
-}
-
 func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        sendError(w, "Только POST запросы", http.StatusMethodNotAllowed)
-        return
-    }
+	if r.Method != http.MethodPost {
+		sendError(w, "Только POST запросы", http.StatusMethodNotAllowed)
+		return
+	}
 
-    var req LooksMaxTransformRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        sendError(w, "Неверный формат данных", http.StatusBadRequest)
-        return
-    }
+	var req LooksMaxTransformRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		sendError(w, "Неверный формат данных", http.StatusBadRequest)
+		return
+	}
 
-    if req.ImageBase64 == "" {
-        sendError(w, "Нет фото", http.StatusBadRequest)
-        return
-    }
+	if req.ImageBase64 == "" {
+		sendError(w, "Нет фото", http.StatusBadRequest)
+		return
+	}
 
-    // Декодируем base64 в байты для multipart
-    imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
-    if err != nil {
-        sendError(w, "Ошибка декодирования фото", http.StatusBadRequest)
-        return
-    }
+	imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
+	if err != nil {
+		sendError(w, "Ошибка декодирования фото", http.StatusBadRequest)
+		return
+	}
 
-    tipsText := strings.Join(req.Tips, ". ")
-    prompt := fmt.Sprintf(`Улучши внешность человека на фото применив эти изменения: %s. 
+	tipsText := strings.Join(req.Tips, ". ")
+	prompt := fmt.Sprintf(`Улучши внешность человека на фото применив эти изменения: %s. 
 Сохрани лицо и черты узнаваемыми. Сделай кожу чище, осанку лучше, общий вид ухоженнее. Реалистично, как профессиональный фотошоп.`, tipsText)
 
-    // Multipart форма для /images/edits
-    var buf bytes.Buffer
-    mw := multipart.NewWriter(&buf)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
 
-    // image
-    fw, _ := mw.CreateFormFile("image", "photo.jpg")
-    fw.Write(imgBytes)
+	fw, _ := mw.CreateFormFile("image", "photo.jpg")
+	fw.Write(imgBytes)
 
-    // model
-    mw.WriteField("model", "gpt-image-1")
-    // prompt
-    mw.WriteField("prompt", prompt)
-    // size
-    mw.WriteField("size", "1024x1024")
-    // response_format
-    mw.WriteField("response_format", "b64_json")
+	mw.WriteField("model", "gpt-image-1")
+	mw.WriteField("prompt", prompt)
+	mw.WriteField("size", "1024x1024")
+	mw.WriteField("response_format", "b64_json")
 
-    mw.Close()
+	mw.Close()
 
-    ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 
-    httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/images/edits", &buf)
-    httpReq.Header.Set("Authorization", "Bearer "+openaiKey)
-    httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/images/edits", &buf)
+	httpReq.Header.Set("Authorization", "Bearer "+openaiKey)
+	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
 
-    resp, err := httpClient.Do(httpReq)
-    if err != nil {
-        sendError(w, "Ошибка запроса к OpenAI: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer resp.Body.Close()
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		sendError(w, "Ошибка запроса к OpenAI: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
 
-    body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 
-    var imgResp struct {
-        Data []struct {
-            B64JSON string `json:"b64_json"`
-        } `json:"data"`
-    }
-    if err := json.Unmarshal(body, &imgResp); err != nil || len(imgResp.Data) == 0 {
-        log.Printf("OpenAI Image Error: %s", string(body))
-        sendError(w, "Ошибка генерации изображения", http.StatusInternalServerError)
-        return
-    }
+	var imgResp struct {
+		Data []struct {
+			B64JSON string `json:"b64_json"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &imgResp); err != nil || len(imgResp.Data) == 0 {
+		log.Printf("OpenAI Image Error: %s", string(body))
+		sendError(w, "Ошибка генерации изображения", http.StatusInternalServerError)
+		return
+	}
 
-    sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
-        ImageBase64: imgResp.Data[0].B64JSON,
-    }}, http.StatusOK)
+	sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
+		ImageBase64: imgResp.Data[0].B64JSON,
+	}}, http.StatusOK)
 }
 
 // ==================== MAIN ====================
@@ -991,8 +950,13 @@ func main() {
 		log.Fatal("❌ OPENROUTER_KEY не установлен")
 	}
 
+	openaiKey = os.Getenv("OPENAI_KEY")
+	if openaiKey == "" {
+		log.Println("⚠️  OPENAI_KEY не установлен — looksmax-transform не будет работать")
+	}
+
 	httpClient = &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
@@ -1016,7 +980,7 @@ func main() {
 	}
 
 	log.Printf("✅ Сервер запущен на порту %s", port)
-	log.Printf("📍 Endpoints: /health, /generate, /tips, /recovery, /looksmax-tip")
+	log.Printf("📍 Endpoints: /health, /generate, /tips, /recovery, /looksmax-tip, /looksmax-analyze, /looksmax-transform")
 	log.Printf("🔒 Rate Limit: 10 запросов/мин на IP")
 
 	if err := http.ListenAndServe("0.0.0.0:"+port, nil); err != nil {
