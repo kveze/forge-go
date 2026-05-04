@@ -723,7 +723,7 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		if len(req.ImageBase64) > 7*1024*1024 { // ~5MB в base64
     sendError(w, "Фото слишком большое", http.StatusBadRequest)
     return
-	
+	}
 
 	imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
 if err != nil {
@@ -743,68 +743,120 @@ if !isJPEG && !isPNG && !isWEBP {
 
 
 
-    // GPT-4o Vision запрос
-    type ContentItem struct {
-        Type     string `json:"type"`
-        Text     string `json:"text,omitempty"`
-        ImageURL *struct {
-            URL string `json:"url"`
-        } `json:"image_url,omitempty"`
-    }
-
-    type VisionMessage struct {
-        Role    string        `json:"role"`
-        Content []ContentItem `json:"content"`
-    }
-
-    type VisionRequest struct {
-        Model    string          `json:"model"`
-        Messages []VisionMessage `json:"messages"`
-    }
-
-
+type GeminiPart struct {
+	Text       string            `json:"text,omitempty"`
+	InlineData *GeminiInlineData `json:"inline_data,omitempty"`
+}
+ 
+type GeminiInlineData struct {
+	MimeType string `json:"mime_type"`
+	Data     string `json:"data"`
+}
+ 
+type GeminiContent struct {
+	Parts []GeminiPart `json:"parts"`
+}
+ 
+type GeminiRequest struct {
+	Contents         []GeminiContent  `json:"contents"`
+	SystemInstruction *GeminiContent  `json:"system_instruction,omitempty"`
+}
+ 
+type GeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+}
+ 
+// --- использование ---
+ 
+geminiKey := os.Getenv("GEMINI_API_KEY")
+ 
 systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
- Анализируй лицо на фото и давай конкретные советы.
-Стиль: прямой, как друг который реально шарит. Без воды. 
+Анализируй лицо на фото и давай конкретные советы.
+Стиль: прямой, как друг который реально шарит. Без воды.
 Если лица нет — верни: {"error": "no_face"}
 Если лицо есть — дай 3 конкретных looksmax совета.
-Верни ТОЛЬКО JSON: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
-
-    userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу. По типу: пей много воды, но не на ночь`, req.Age, req.Gender, req.Goal)
-
-    visionReq := VisionRequest{
-        Model: "gpt-4o",
-        Messages: []VisionMessage{
-            {
-                Role: "system",
-                Content: []ContentItem{
-                    {Type: "text", Text: systemText},
-                },
-            },
-            {
-                Role: "user",
-                Content: []ContentItem{
-                    {Type: "text", Text: userText},
-                    {
-                        Type: "image_url",
-                        ImageURL: &struct {
-                            URL string `json:"url"`
-                        }{URL: "data:image/jpeg;base64," + req.ImageBase64},
-                    },
-                },
-            },
-        },
-    }
-
-    jsonBody, _ := json.Marshal(visionReq)
-
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
-
-    httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(jsonBody))
-    httpReq.Header.Set("Authorization", "Bearer "+openaiKey)
-    httpReq.Header.Set("Content-Type", "application/json")
-
+Верни ТОЛЬКО JSON без markdown: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
+ 
+userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.`, req.Age, req.Gender, req.Goal)
+ 
+geminiReq := GeminiRequest{
+	SystemInstruction: &GeminiContent{
+		Parts: []GeminiPart{
+			{Text: systemText},
+		},
+	},
+	Contents: []GeminiContent{
+		{
+			Parts: []GeminiPart{
+				{Text: userText},
+				{
+					InlineData: &GeminiInlineData{
+						MimeType: "image/jpeg",
+						Data:     req.ImageBase64, // чистый base64 без префикса
+					},
+				},
+			},
+		},
+	},
+}
+ 
+jsonBody, _ := json.Marshal(geminiReq)
+ 
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+ 
+url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + geminiKey
+ 
+httpReq, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
+httpReq.Header.Set("Content-Type", "application/json")
+ 
+client := &http.Client{}
+resp, err := client.Do(httpReq)
+if err != nil {
+	c.JSON(500, gin.H{"error": err.Error()})
+	return
+}
+defer resp.Body.Close()
+ 
+var geminiResp GeminiResponse
+if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+	c.JSON(500, gin.H{"error": "decode error"})
+	return
+}
+ 
+if len(geminiResp.Candidates) == 0 {
+	c.JSON(500, gin.H{"error": "no candidates"})
+	return
+}
+ 
+rawText := geminiResp.Candidates[0].Content.Parts[0].Text
+ 
+// Gemini иногда оборачивает в ```json ... ``` — чистим
+rawText = strings.TrimSpace(rawText)
+rawText = strings.TrimPrefix(rawText, "```json")
+rawText = strings.TrimPrefix(rawText, "```")
+rawText = strings.TrimSuffix(rawText, "```")
+rawText = strings.TrimSpace(rawText)
+ 
+var result map[string]interface{}
+if err := json.Unmarshal([]byte(rawText), &result); err != nil {
+	c.JSON(500, gin.H{"error": "json parse error", "raw": rawText})
+	return
+}
+ 
+// Проверка на no_face
+if errMsg, ok := result["error"]; ok {
+	c.JSON(200, gin.H{"success": false, "error": errMsg})
+	return
+}
+ 
+c.JSON(200, gin.H{"success": true, "data": result})
     resp, err := httpClient.Do(httpReq)
     if err != nil {
         sendError(w, "Ошибка запроса к AI: "+err.Error(), http.StatusInternalServerError)
