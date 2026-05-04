@@ -1036,7 +1036,7 @@ func main() {
 	http.HandleFunc("/recovery", recoverMiddleware(corsMiddleware(authMiddleware(recoveryHandler))))
 	http.HandleFunc("/looksmax-tip", recoverMiddleware(corsMiddleware(looksMaxTipHandler)))
 	http.HandleFunc("/looksmax-analyze", recoverMiddleware(corsMiddleware(looksMaxAnalyzeHandler)))
-	http.HandleFunc("/chat", corsMiddleware(chatHandler))
+	http.HandleFunc("/chat", recoverMiddleware(corsMiddleware(authMiddleware(chatHandler))))
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
 
 	port := os.Getenv("PORT")
