@@ -622,7 +622,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
     allMessages := append([]Message{{Role: "system", Content: system}}, body.Messages...)
 
     reqBody := ChatAPIRequest{
-		Model: "nvidia/nemotron-super-49b-v1:free",
+		Model: "openai/gpt-4o-mini",
         Messages: allMessages,
     }
 
