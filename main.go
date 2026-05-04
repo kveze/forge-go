@@ -166,6 +166,16 @@ type GeminiResponse struct {
 	} `json:"candidates"`
 }
 
+type ChatRequest struct {
+    Messages []Message `json:"messages"`
+    UserData map[string]interface{} `json:"userData"`
+    Plan     interface{} `json:"plan"`
+}
+
+type ChatAPIRequest struct {
+    Model    string    `json:"model"`
+    Messages []Message `json:"messages"`
+}
 // ==================== RATE LIMITER ====================
 
 type RateLimiter struct {
@@ -592,11 +602,65 @@ func recoveryHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, APIResponse{Success: true, Data: response}, http.StatusOK)
 }
 
+
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, APIResponse{Success: true, Data: map[string]string{
 		"status":    "ok",
 		"timestamp": time.Now().Format(time.RFC3339),
 	}}, http.StatusOK)
+}
+
+
+func chatHandler(w http.ResponseWriter, r *http.Request) {
+    var body ChatRequest
+    json.NewDecoder(r.Body).Decode(&body)
+
+    system := buildSystemPrompt(body.UserData, body.Plan)
+    
+    // Добавляем системный промпт как первое сообщение
+    allMessages := append([]Message{{Role: "system", Content: system}}, body.Messages...)
+
+    reqBody := ChatAPIRequest{
+        Model:    "google/gemma-3-12b-it:free",
+        Messages: allMessages,
+    }
+
+    jsonBody, _ := json.Marshal(reqBody)
+
+    req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonBody))
+    req.Header.Set("Authorization", "Bearer " + os.Getenv("OPENROUTER_KEY"))
+    req.Header.Set("Content-Type", "application/json")
+
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        w.WriteHeader(500)
+        json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+        return
+    }
+    defer resp.Body.Close()
+
+    body2, _ := io.ReadAll(resp.Body)
+    w.Header().Set("Content-Type", "application/json")
+    w.Write(body2)
+}
+
+func buildSystemPrompt(userData map[string]interface{}, plan interface{}) string {
+    planStr := ""
+    if plan != nil {
+        planBytes, _ := json.Marshal(plan)
+        planStr = string(planBytes)
+    }
+    
+    return fmt.Sprintf(`Ты персональный AI тренер FORGE. Строгий, честный, поддерживающий. Говоришь кратко — 2-4 предложения.
+
+ДАННЫЕ: %v
+ПЛАН: %s
+
+ПРАВИЛА:
+- Отвечай коротко и конкретно
+- Без markdown и звёздочек
+- На русском языке`, userData, planStr)
 }
 
 // ==================== LOOKSMAX TIP ====================
@@ -972,6 +1036,7 @@ func main() {
 	http.HandleFunc("/recovery", recoverMiddleware(corsMiddleware(authMiddleware(recoveryHandler))))
 	http.HandleFunc("/looksmax-tip", recoverMiddleware(corsMiddleware(looksMaxTipHandler)))
 	http.HandleFunc("/looksmax-analyze", recoverMiddleware(corsMiddleware(looksMaxAnalyzeHandler)))
+	http.HandleFunc("/chat", corsMiddleware(chatHandler))
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
 
 	port := os.Getenv("PORT")
