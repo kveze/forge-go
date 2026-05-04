@@ -344,7 +344,7 @@ func askAI(prompt string, systemPrompt string) (string, error) {
 		return "", fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Authorization", "Bearer " + apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("HTTP-Referer", "https://forge-client-main.netlify.app")
 	req.Header.Set("X-Title", "AI Fitness Trainer")
