@@ -762,9 +762,6 @@ if !isJPEG && !isPNG && !isWEBP {
         Messages []VisionMessage `json:"messages"`
     }
 
-    systemText := `
-Примеры: "Отрасти челюсть — жуй жвачку 15 мин в день", "Кожа жирная — умывайся 2x салициловой кислотой"
-Верни ТОЛЬКО JSON: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
 
 systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
  Анализируй лицо на фото и давай конкретные советы.
@@ -773,7 +770,7 @@ systemText := `Ты научный looksmaxxer с реальным опытом.
 Если лицо есть — дай 3 конкретных looksmax совета.
 Верни ТОЛЬКО JSON: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
 
-    userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу. По типу: пей много воды`, req.Age, req.Gender, req.Goal)
+    userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу. По типу: пей много воды, но не на ночь`, req.Age, req.Gender, req.Goal)
 
     visionReq := VisionRequest{
         Model: "gpt-4o",
