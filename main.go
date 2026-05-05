@@ -324,7 +324,7 @@ func askAI(prompt string, systemPrompt string) (string, error) {
 	}
 
 	reqBody := OpenRouterRequest{
-		Model: "openai/gpt-4o-mini",
+		Model: "openai/gpt-4o"
 		Messages: []Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
