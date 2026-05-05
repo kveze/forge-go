@@ -622,7 +622,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
     allMessages := append([]Message{{Role: "system", Content: system}}, body.Messages...)
 
     reqBody := ChatAPIRequest{
-		Model: "openai/gpt-4o-mini",
+		Model: "openai/gpt-4o"
         Messages: allMessages,
     }
 
