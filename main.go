@@ -616,6 +616,8 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
     var body ChatRequest
     json.NewDecoder(r.Body).Decode(&body)
 
+	log.Printf("Chat request - userData: %v, plan: %v", body.UserData, body.Plan)
+
     system := buildSystemPrompt(body.UserData, body.Plan)
 
     allMessages := append([]Message{{Role: "system", Content: system}}, body.Messages...)
