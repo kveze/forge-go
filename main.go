@@ -617,20 +617,20 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
     json.NewDecoder(r.Body).Decode(&body)
 
     system := buildSystemPrompt(body.UserData, body.Plan)
-    
-    // Добавляем системный промпт как первое сообщение
+
     allMessages := append([]Message{{Role: "system", Content: system}}, body.Messages...)
 
     reqBody := ChatAPIRequest{
-		Model: "openai/gpt-4o-mini",
+        Model:    "openai/gpt-4o",
         Messages: allMessages,
     }
 
     jsonBody, _ := json.Marshal(reqBody)
 
     req, _ := http.NewRequest("POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonBody))
-    req.Header.Set("Authorization", "Bearer " + os.Getenv("OPENROUTER_KEY"))
+    req.Header.Set("Authorization", "Bearer "+apiKey)
     req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("HTTP-Referer", "https://forge-client-main.netlify.app")
 
     resp, err := httpClient.Do(req)
     if err != nil {
@@ -641,6 +641,41 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
     defer resp.Body.Close()
 
     body2, _ := io.ReadAll(resp.Body)
+
+    // Парсим ответ чтобы извлечь план если есть
+    var openRouterResp OpenRouterResponse
+    if err := json.Unmarshal(body2, &openRouterResp); err == nil && len(openRouterResp.Choices) > 0 {
+        content := openRouterResp.Choices[0].Message.Content
+
+        // Ищем блок с планом
+        planStart := strings.Index(content, "ПЛАН_СТАРТ")
+        planEnd := strings.Index(content, "ПЛАН_КОНЕЦ")
+
+        if planStart != -1 && planEnd != -1 {
+            planJSON := strings.TrimSpace(content[planStart+len("ПЛАН_СТАРТ") : planEnd])
+            textAfter := strings.TrimSpace(content[planEnd+len("ПЛАН_КОНЕЦ"):])
+
+            var plan WorkoutPlan
+            if err := json.Unmarshal([]byte(planJSON), &plan); err == nil {
+                // Возвращаем специальный ответ с планом
+                w.Header().Set("Content-Type", "application/json")
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                    "choices": []map[string]interface{}{
+                        {
+                            "message": map[string]interface{}{
+                                "content": textAfter,
+                                "role":    "assistant",
+                            },
+                        },
+                    },
+                    "plan": plan,
+                })
+                return
+            }
+        }
+    }
+
+    // Обычный ответ без плана
     w.Header().Set("Content-Type", "application/json")
     w.Write(body2)
 }
@@ -651,16 +686,42 @@ func buildSystemPrompt(userData map[string]interface{}, plan interface{}) string
         planBytes, _ := json.Marshal(plan)
         planStr = string(planBytes)
     }
-    
-    return fmt.Sprintf(`Ты персональный AI тренер FORGE. Строгий, честный, поддерживающий. Говоришь кратко — 2-4 предложения.
 
-ДАННЫЕ: %v
-ПЛАН: %s
+    return fmt.Sprintf(`Ты персональный AI тренер FORGE. Строгий, честный, поддерживающий. Говоришь кратко.
 
-ПРАВИЛА:
-- Отвечай коротко и конкретно
+%s
+%s
+
+ПРАВИЛА ОБЩЕНИЯ:
+- Отвечай коротко — 2-4 предложения
 - Без markdown и звёздочек
-- На русском языке`, userData, planStr)
+- На русском языке
+
+ГЕНЕРАЦИЯ ПЛАНА:
+Если ты собрал все данные пользователя (пол, возраст, вес, цель, оборудование, количество дней) — 
+сгенерируй план тренировок и верни его в специальном формате:
+
+ПЛАН_СТАРТ
+{"week_plan": [{"day": 1, "focus": "...", "exercises": [{"name": "...", "sets": 3, "reps": "10-12", "rest_sec": 60, "notes": "..."}]}], "goal": "...", "level": "..."}
+ПЛАН_КОНЕЦ
+
+После блока с планом добавь короткий комментарий тренера.
+
+Если данных недостаточно — спроси недостающие. Не генерируй план без всех данных.`,
+        func() string {
+            if userData != nil {
+                bytes, _ := json.Marshal(userData)
+                return "ДАННЫЕ КЛИЕНТА: " + string(bytes)
+            }
+            return "Данные клиента неизвестны — собери их в разговоре."
+        }(),
+        func() string {
+            if planStr != "" {
+                return "ТЕКУЩИЙ ПЛАН: " + planStr
+            }
+            return ""
+        }(),
+    )
 }
 
 // ==================== LOOKSMAX TIP ====================
