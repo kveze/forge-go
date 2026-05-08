@@ -383,8 +383,8 @@ func askAI(prompt string, systemPrompt string) (string, error) {
 // ==================== ВАЛИДАЦИЯ ====================
 
 func validateWorkoutRequest(req WorkoutRequest) error {
-	if req.Days < 1 || req.Days > 4 {
-		return fmt.Errorf("дни: от 1 до 4")
+	if req.Days < 2 || req.Days > 5 {
+		return fmt.Errorf("дни: от 2 до 5")
 	}
 	if req.Age < 10 || req.Age > 100 {
 		return fmt.Errorf("возраст: от 10 до 100")
