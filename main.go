@@ -960,7 +960,7 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	geminiURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + geminiKey
+geminiURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent?key=" + geminiKey
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", geminiURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
