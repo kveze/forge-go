@@ -1064,20 +1064,6 @@ sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
     ImageBase64: b64,
 }}, http.StatusOK)
 
-// Скачиваем и конвертируем в base64
-imgResp, err := httpClient.Get(repResp.Output[0])
-if err != nil {
-    sendError(w, "Ошибка загрузки", http.StatusInternalServerError)
-    return
-}
-defer imgResp.Body.Close()
-
-imgBytes, _ := io.ReadAll(imgResp.Body)
-b64 := base64.StdEncoding.EncodeToString(imgBytes)
-
-sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
-    ImageBase64: b64,
-}}, http.StatusOK)
 }
 
 // ==================== MAIN ====================
