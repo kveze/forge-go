@@ -1003,7 +1003,7 @@ log.Printf("Replicate key len: %d, prefix: %s", len(replicateKey), replicateKey[
 httpReq, _ := http.NewRequestWithContext(ctx, "POST",
     "https://api.replicate.com/v1/predictions", bytes.NewBuffer(jsonBody))
 httpReq.Header.Set("Content-Type", "application/json")
-httpReq.Header.Set("Authorization", "Bearer "+replicateKey)
+httpReq.Header.Set("Authorization", "Token "+replicateKey)
 httpReq.Header.Set("Prefer", "wait=60")
 
 resp, err := httpClient.Do(httpReq)
