@@ -18,7 +18,6 @@ import (
 	"image/png"
 	"image"
 	"net/textproto"
-	"mime/multipart"
 )
 
 // ==================== СТРУКТУРЫ ====================
