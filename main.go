@@ -136,35 +136,6 @@ type LooksMaxTransformResponse struct {
 	ImageBase64 string `json:"image_base64"`
 }
 
-// Gemini
-type GeminiPart struct {
-	Text       string            `json:"text,omitempty"`
-	InlineData *GeminiInlineData `json:"inline_data,omitempty"`
-}
-
-type GeminiInlineData struct {
-	MimeType string `json:"mime_type"`
-	Data     string `json:"data"`
-}
-
-type GeminiContent struct {
-	Parts []GeminiPart `json:"parts"`
-}
-
-type GeminiRequest struct {
-	Contents          []GeminiContent `json:"contents"`
-	SystemInstruction *GeminiContent  `json:"system_instruction,omitempty"`
-}
-
-type GeminiResponse struct {
-	Candidates []struct {
-		Content struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-	} `json:"candidates"`
-}
 
 type ChatRequest struct {
     Messages []Message `json:"messages"`
@@ -920,12 +891,6 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		mimeType = "image/webp"
 	}
 
-	geminiKey := os.Getenv("GEMINI_API_KEY")
-	if geminiKey == "" {
-		sendError(w, "Gemini API ключ не настроен", http.StatusInternalServerError)
-		return
-	}
-
 	systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
 Анализируй лицо на фото и давай конкретные советы.
 Стиль: прямой, как друг который реально шарит. Без воды.
@@ -933,21 +898,22 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 Если лицо есть — дай 3 конкретных looksmax совета.
 Верни ТОЛЬКО JSON без markdown: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
 
-	userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.`,
-		req.Age, req.Gender, req.Goal)
+	openRouterKey := os.Getenv("OPENROUTER_KEY")
 
-	geminiReq := GeminiRequest{
-		SystemInstruction: &GeminiContent{
-			Parts: []GeminiPart{{Text: systemText}},
-		},
-		Contents: []GeminiContent{
+	requestBody := map[string]interface{}{
+		"model": "google/gemini-2.0-flash-exp:free",
+		"messages": []map[string]interface{}{
 			{
-				Parts: []GeminiPart{
-					{Text: userText},
+				"role": "user",
+				"content": []map[string]interface{}{
 					{
-						InlineData: &GeminiInlineData{
-							MimeType: mimeType,
-							Data:     req.ImageBase64,
+						"type": "text",
+						"text": fmt.Sprintf("%s\n\nВозраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.", systemText, req.Age, req.Gender, req.Goal),
+					},
+					{
+						"type": "image_url",
+						"image_url": map[string]string{
+							"url": fmt.Sprintf("data:%s;base64,%s", mimeType, req.ImageBase64),
 						},
 					},
 				},
@@ -955,43 +921,40 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	jsonBody, _ := json.Marshal(geminiReq)
+	jsonBody, _ := json.Marshal(requestBody)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-geminiURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=" + geminiKey
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", geminiURL, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		sendError(w, "Ошибка создания запроса", http.StatusInternalServerError)
-		return
-	}
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://openrouter.ai/api/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+openRouterKey)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		sendError(w, "Ошибка запроса к Gemini: "+err.Error(), http.StatusInternalServerError)
+		sendError(w, "Ошибка запроса: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
-respBody, _ := io.ReadAll(resp.Body)
-log.Printf("Gemini status: %d, body: %s", resp.StatusCode, string(respBody))
+	respBody, _ := io.ReadAll(resp.Body)
+	log.Printf("OpenRouter status: %d, body: %s", resp.StatusCode, string(respBody))
 
-var geminiResp GeminiResponse
-if err := json.Unmarshal(respBody, &geminiResp); err != nil {
-    sendError(w, "Ошибка декодирования ответа Gemini", http.StatusInternalServerError)
-    return
-}
+	var orResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	json.Unmarshal(respBody, &orResp)
 
-	if len(geminiResp.Candidates) == 0 {
-		sendError(w, "Gemini не вернул ответ", http.StatusInternalServerError)
+	if len(orResp.Choices) == 0 {
+		sendError(w, "Нет ответа от модели", http.StatusInternalServerError)
 		return
 	}
 
-	rawText := geminiResp.Candidates[0].Content.Parts[0].Text
-	rawText = strings.TrimSpace(rawText)
+	rawText := strings.TrimSpace(orResp.Choices[0].Message.Content)
 	rawText = strings.TrimPrefix(rawText, "```json")
 	rawText = strings.TrimPrefix(rawText, "```")
 	rawText = strings.TrimSuffix(rawText, "```")
