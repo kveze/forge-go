@@ -1016,16 +1016,53 @@ defer resp.Body.Close()
 body, _ := io.ReadAll(resp.Body)
 log.Printf("Replicate status: %d, body: %s", resp.StatusCode, string(body))
 
-var repResp struct {
+var predResp struct {
+    ID     string   `json:"id"`
+    Status string   `json:"status"`
     Output []string `json:"output"`
     Error  string   `json:"error"`
 }
-json.Unmarshal(body, &repResp)
+json.Unmarshal(body, &predResp)
 
-if repResp.Error != "" || len(repResp.Output) == 0 {
-    sendError(w, "Ошибка генерации", http.StatusInternalServerError)
+// Ждём результат (polling)
+for i := 0; i < 30; i++ {
+    if predResp.Status == "succeeded" { break }
+    if predResp.Status == "failed" {
+        sendError(w, "Генерация провалилась: "+predResp.Error, http.StatusInternalServerError)
+        return
+    }
+    time.Sleep(3 * time.Second)
+
+    pollReq, _ := http.NewRequest("GET",
+        "https://api.replicate.com/v1/predictions/"+predResp.ID, nil)
+    pollReq.Header.Set("Authorization", "Token "+replicateKey)
+    pollResp, err := httpClient.Do(pollReq)
+    if err != nil { break }
+    pollBody, _ := io.ReadAll(pollResp.Body)
+    pollResp.Body.Close()
+    json.Unmarshal(pollBody, &predResp)
+    log.Printf("Replicate poll: %s", predResp.Status)
+}
+
+if len(predResp.Output) == 0 {
+    sendError(w, "Нет результата", http.StatusInternalServerError)
     return
 }
+
+// Скачиваем и конвертируем в base64
+imgResp, err := httpClient.Get(predResp.Output[0])
+if err != nil {
+    sendError(w, "Ошибка загрузки", http.StatusInternalServerError)
+    return
+}
+defer imgResp.Body.Close()
+
+imgBytes, _ := io.ReadAll(imgResp.Body)
+b64 := base64.StdEncoding.EncodeToString(imgBytes)
+
+sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
+    ImageBase64: b64,
+}}, http.StatusOK)
 
 // Скачиваем и конвертируем в base64
 imgResp, err := httpClient.Get(repResp.Output[0])
