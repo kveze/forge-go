@@ -901,7 +901,7 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	openRouterKey := os.Getenv("OPENROUTER_KEY")
 
 	requestBody := map[string]interface{}{
-		"model": "nvidia/llama-nemotron-embed-vl-1b-v2:free",
+		"model": "google/gemma-4-31b-it:free",
 		"messages": []map[string]interface{}{
 			{
 				"role": "user",
