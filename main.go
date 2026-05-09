@@ -1004,61 +1004,65 @@ func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
 	prompt := fmt.Sprintf(`Portrait photo of a person with improved appearance: %s. 
 Keep the face and features recognizable. Clean skin, better posture, groomed look. Photorealistic, like professional retouching.`, tipsText)
 
-	falKey := os.Getenv("FAL_KEY")
+replicateKey := os.Getenv("REPLICATE_KEY")
 
-	// fal.ai flux принимает JSON
-	requestBody := map[string]interface{}{
-		"prompt":            prompt,
-		"image_url":         fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
-		"num_inference_steps": 28,
-		"strength":          0.75,
-		"guidance_scale":    7.5,
-	}
+requestBody := map[string]interface{}{
+    "version": "black-forest-labs/flux-dev",
+    "input": map[string]interface{}{
+        "prompt":        prompt,
+        "image":         fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
+        "strength":      0.75,
+        "num_outputs":   1,
+        "output_format": "webp",
+    },
+}
 
-	jsonBody, _ := json.Marshal(requestBody)
+jsonBody, _ := json.Marshal(requestBody)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
+ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+defer cancel()
 
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST",
-		"https://fal.run/fal-ai/flux/dev/image-to-image", bytes.NewBuffer(jsonBody))
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Key "+falKey)
+httpReq, _ := http.NewRequestWithContext(ctx, "POST",
+    "https://api.replicate.com/v1/predictions", bytes.NewBuffer(jsonBody))
+httpReq.Header.Set("Content-Type", "application/json")
+httpReq.Header.Set("Authorization", "Bearer "+replicateKey)
+httpReq.Header.Set("Prefer", "wait=60")
 
-	resp, err := httpClient.Do(httpReq)
-	if err != nil {
-		sendError(w, "Ошибка запроса к fal.ai: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
+resp, err := httpClient.Do(httpReq)
+if err != nil {
+    sendError(w, "Ошибка запроса к Replicate: "+err.Error(), http.StatusInternalServerError)
+    return
+}
+defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("Fal.ai status: %d, body: %s", resp.StatusCode, string(body))
+body, _ := io.ReadAll(resp.Body)
+log.Printf("Replicate status: %d, body: %s", resp.StatusCode, string(body))
 
-	var falResp struct {
-		Images []struct {
-			URL string `json:"url"`
-		} `json:"images"`
-	}
-	if err := json.Unmarshal(body, &falResp); err != nil || len(falResp.Images) == 0 {
-		sendError(w, "Ошибка генерации изображения", http.StatusInternalServerError)
-		return
-	}
+var repResp struct {
+    Output []string `json:"output"`
+    Error  string   `json:"error"`
+}
+json.Unmarshal(body, &repResp)
 
-	// Скачиваем изображение и конвертируем в base64
-	imgResp, err := httpClient.Get(falResp.Images[0].URL)
-	if err != nil {
-		sendError(w, "Ошибка загрузки изображения", http.StatusInternalServerError)
-		return
-	}
-	defer imgResp.Body.Close()
+if repResp.Error != "" || len(repResp.Output) == 0 {
+    sendError(w, "Ошибка генерации", http.StatusInternalServerError)
+    return
+}
 
-	imgBytes, _ := io.ReadAll(imgResp.Body)
-	b64 := base64.StdEncoding.EncodeToString(imgBytes)
+// Скачиваем и конвертируем в base64
+imgResp, err := httpClient.Get(repResp.Output[0])
+if err != nil {
+    sendError(w, "Ошибка загрузки", http.StatusInternalServerError)
+    return
+}
+defer imgResp.Body.Close()
 
-	sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
-		ImageBase64: b64,
-	}}, http.StatusOK)
+imgBytes, _ := io.ReadAll(imgResp.Body)
+b64 := base64.StdEncoding.EncodeToString(imgBytes)
+
+sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
+    ImageBase64: b64,
+}}, http.StatusOK)
 }
 
 // ==================== MAIN ====================
