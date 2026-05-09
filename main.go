@@ -901,7 +901,7 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	openRouterKey := os.Getenv("OPENROUTER_KEY")
 
 	requestBody := map[string]interface{}{
-		"model": "meta-llama/llama-4-maverick:free",
+		"model": "google/gemma-4-27b-it:free",
 		"messages": []map[string]interface{}{
 			{
 				"role": "user",
