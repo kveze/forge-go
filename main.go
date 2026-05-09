@@ -9,15 +9,11 @@ import (
 	"io"
 	"log"
 	"math"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
-	"image/png"
-	"image"
-	"net/textproto"
 )
 
 // ==================== СТРУКТУРЫ ====================
@@ -1013,61 +1009,64 @@ func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
-	if err != nil {
-		sendError(w, "Ошибка декодирования фото", http.StatusBadRequest)
-		return
+	tipsText := strings.Join(req.Tips, ". ")
+	prompt := fmt.Sprintf(`Portrait photo of a person with improved appearance: %s. 
+Keep the face and features recognizable. Clean skin, better posture, groomed look. Photorealistic, like professional retouching.`, tipsText)
+
+	falKey := os.Getenv("FAL_KEY")
+
+	// fal.ai flux принимает JSON
+	requestBody := map[string]interface{}{
+		"prompt":            prompt,
+		"image_url":         fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
+		"num_inference_steps": 28,
+		"strength":          0.75,
+		"guidance_scale":    7.5,
 	}
 
-	tipsText := strings.Join(req.Tips, ". ")
-	prompt := fmt.Sprintf(`Улучши внешность человека на фото применив эти изменения: %s. 
-Сохрани лицо и черты узнаваемыми. Сделай кожу чище, осанку лучше, общий вид ухоженнее. Реалистично, как профессиональный фотошоп.`, tipsText)
+	jsonBody, _ := json.Marshal(requestBody)
 
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-h := make(textproto.MIMEHeader)
-h.Set("Content-Disposition", `form-data; name="image"; filename="photo.png"`)
-h.Set("Content-Type", "image/png")
-fw, _ := mw.CreatePart(h)
-fw.Write(imgBytes)
-
-	mw.WriteField("model", "dall-e-2")
-	mw.WriteField("prompt", prompt)
-	mw.WriteField("size", "1024x1024")
-	mw.WriteField("response_format", "b64_json")
-
-	mw.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	httpReq, _ := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/images/edits", &buf)
-	httpReq.Header.Set("Authorization", "Bearer "+openaiKey)
-	httpReq.Header.Set("Content-Type", mw.FormDataContentType())
+	httpReq, _ := http.NewRequestWithContext(ctx, "POST",
+		"https://fal.run/fal-ai/flux/dev/image-to-image", bytes.NewBuffer(jsonBody))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Key "+falKey)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		sendError(w, "Ошибка запроса к OpenAI: "+err.Error(), http.StatusInternalServerError)
+		sendError(w, "Ошибка запроса к fal.ai: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	log.Printf("Fal.ai status: %d, body: %s", resp.StatusCode, string(body))
 
-	var imgResp struct {
-		Data []struct {
-			B64JSON string `json:"b64_json"`
-		} `json:"data"`
+	var falResp struct {
+		Images []struct {
+			URL string `json:"url"`
+		} `json:"images"`
 	}
-	if err := json.Unmarshal(body, &imgResp); err != nil || len(imgResp.Data) == 0 {
-		log.Printf("OpenAI Image Error: %s", string(body))
+	if err := json.Unmarshal(body, &falResp); err != nil || len(falResp.Images) == 0 {
 		sendError(w, "Ошибка генерации изображения", http.StatusInternalServerError)
 		return
 	}
 
+	// Скачиваем изображение и конвертируем в base64
+	imgResp, err := httpClient.Get(falResp.Images[0].URL)
+	if err != nil {
+		sendError(w, "Ошибка загрузки изображения", http.StatusInternalServerError)
+		return
+	}
+	defer imgResp.Body.Close()
+
+	imgBytes, _ := io.ReadAll(imgResp.Body)
+	b64 := base64.StdEncoding.EncodeToString(imgBytes)
+
 	sendJSON(w, APIResponse{Success: true, Data: LooksMaxTransformResponse{
-		ImageBase64: imgResp.Data[0].B64JSON,
+		ImageBase64: b64,
 	}}, http.StatusOK)
 }
 
