@@ -307,15 +307,16 @@ func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
     defer searchResp.Body.Close()
 
 	body, _ := io.ReadAll(searchResp.Body)
+body, _ := io.ReadAll(searchResp.Body)
 log.Printf("MuscleWiki search response: %s", string(body))
 
-    var searchResult struct {
-        Results []struct {
-            ID   int    `json:"id"`
-            Name string `json:"name"`
-        } `json:"results"`
-    }
-    json.NewDecoder(searchResp.Body).Decode(&searchResult)
+var searchResult struct {
+    Results []struct {
+        ID   int    `json:"id"`
+        Name string `json:"name"`
+    } `json:"results"`
+}
+json.Unmarshal(body, &searchResult)
 
     if len(searchResult.Results) == 0 {
         sendError(w, "not found", http.StatusNotFound)
