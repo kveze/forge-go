@@ -17,6 +17,8 @@ import (
 	"time"
 	"image/png"
 	"image"
+	"net/textproto"
+	"mime/multipart"
 )
 
 // ==================== СТРУКТУРЫ ====================
@@ -1025,7 +1027,10 @@ func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
-fw, _ := mw.CreateFormFile("image", "photo.png")
+h := make(textproto.MIMEHeader)
+h.Set("Content-Disposition", `form-data; name="image"; filename="photo.png"`)
+h.Set("Content-Type", "image/png")
+fw, _ := mw.CreatePart(h)
 fw.Write(imgBytes)
 
 	mw.WriteField("model", "dall-e-2")
