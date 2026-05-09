@@ -15,6 +15,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"image/png"
+ 	"image/jpeg"
+	"image"
 )
 
 // ==================== СТРУКТУРЫ ====================
