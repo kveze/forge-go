@@ -984,7 +984,7 @@ Keep the face and features recognizable. Clean skin, better posture, groomed loo
 replicateKey := os.Getenv("REPLICATE_KEY")
 
 requestBody := map[string]interface{}{
-    "version": "black-forest-labs/flux-dev",
+    "version": "google/imagen-4",
     "input": map[string]interface{}{
         "prompt":        prompt,
         "image":         fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
