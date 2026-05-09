@@ -990,7 +990,7 @@ requestBody := map[string]interface{}{
         "image":         fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
         "strength":      0.75,
         "num_outputs":   1,
-        "output_format": "webp",
+        "output_format": "jpg",
     },
 }
 
