@@ -322,62 +322,6 @@ func recoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
-    name := r.URL.Query().Get("name")
-    if name == "" {
-        sendError(w, "Нет названия", http.StatusBadRequest)
-        return
-    }
-
-    // Формируем slug из названия
-    slug := strings.ToLower(name)
-    slug = strings.ReplaceAll(slug, " ", "-")
-    slug = strings.ReplaceAll(slug, "ё", "e")
-
-    url := "https://musclewiki.com/ru-ru/exercise/" + slug + "?model=m"
-
-    req, _ := http.NewRequest("GET", url, nil)
-    // Притворяемся браузером
-    req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-    req.Header.Set("Accept", "text/html,application/xhtml+xml")
-    req.Header.Set("Accept-Language", "ru-RU,ru;q=0.9")
-
-    resp, err := httpClient.Do(req)
-    if err != nil || resp.StatusCode != 200 {
-        // Фолбэк на YouTube
-        sendJSON(w, APIResponse{Success: false, Error: "not found"}, http.StatusNotFound)
-        return
-    }
-    defer resp.Body.Close()
-
-    body, _ := io.ReadAll(resp.Body)
-    html := string(body)
-
-    // Ищем видео URL в HTML
-    videoURL := ""
-    if idx := strings.Index(html, `"contentUrl"`); idx != -1 {
-        start := idx + len(`"contentUrl":"`)
-        end := strings.Index(html[start:], `"`)
-        if end > 0 {
-            videoURL = html[start : start+end]
-        }
-    }
-
-    // Ищем mp4 ссылку
-    if videoURL == "" {
-        if idx := strings.Index(html, ".mp4"); idx != -1 {
-            start := strings.LastIndex(html[:idx], `"`) + 1
-            videoURL = html[start : idx+4]
-        }
-    }
-
-    if videoURL == "" {
-        sendJSON(w, APIResponse{Success: false, Error: "video not found"}, http.StatusNotFound)
-        return
-    }
-
-    sendJSON(w, APIResponse{Success: true, Data: map[string]string{"url": videoURL}}, http.StatusOK)
-}
 
 // ==================== УТИЛИТЫ ====================
 
