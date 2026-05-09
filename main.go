@@ -999,6 +999,7 @@ jsonBody, _ := json.Marshal(requestBody)
 ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 defer cancel()
 
+log.Printf("Replicate key len: %d, prefix: %s", len(replicateKey), replicateKey[:min(8, len(replicateKey))])
 httpReq, _ := http.NewRequestWithContext(ctx, "POST",
     "https://api.replicate.com/v1/predictions", bytes.NewBuffer(jsonBody))
 httpReq.Header.Set("Content-Type", "application/json")
