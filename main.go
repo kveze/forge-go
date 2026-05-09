@@ -306,6 +306,9 @@ func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
     }
     defer searchResp.Body.Close()
 
+	body, _ := io.ReadAll(searchResp.Body)
+log.Printf("MuscleWiki search response: %s", string(body))
+
     var searchResult struct {
         Results []struct {
             ID   int    `json:"id"`
@@ -1233,7 +1236,7 @@ func main() {
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
 	http.HandleFunc("/exercise-video", recoverMiddleware(corsMiddleware(exerciseVideoHandler)))
 	http.HandleFunc("/stream-video", recoverMiddleware(corsMiddleware(streamVideoHandler)))
-	
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
