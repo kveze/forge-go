@@ -903,26 +903,15 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 
 	openRouterKey := os.Getenv("OPENROUTER_KEY")
 
-	requestBody := map[string]interface{}{
-		"model": "google/gemma-4-31b-it:free",
-		"messages": []map[string]interface{}{
-			{
-				"role": "user",
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": fmt.Sprintf("%s\n\nВозраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.", systemText, req.Age, req.Gender, req.Goal),
-					},
-					{
-						"type": "image_url",
-						"image_url": map[string]string{
-							"url": fmt.Sprintf("data:%s;base64,%s", mimeType, req.ImageBase64),
-						},
-					},
-				},
-			},
-		},
-	}
+requestBody := map[string]interface{}{
+    "version": "zsxkib/instant-id:latest",
+    "input": map[string]interface{}{
+        "image":          fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
+        "prompt":         prompt,
+        "negative_prompt": "ugly, deformed, disfigured",
+        "num_outputs":    1,
+    },
+}
 
 	jsonBody, _ := json.Marshal(requestBody)
 
