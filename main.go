@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"net/url"
 )
 
 // ==================== СТРУКТУРЫ ====================
@@ -282,6 +283,31 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 
 		next(w, r)
 	}
+}
+
+func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
+    name := r.URL.Query().Get("name")
+    if name == "" {
+        sendError(w, "Нет названия", http.StatusBadRequest)
+        return
+    }
+
+    mwKey := os.Getenv("MUSCLEWIKI_KEY")
+    
+    req, _ := http.NewRequest("GET", 
+        "https://api.musclewiki.com/exercises/?name="+url.QueryEscape(name), nil)
+    req.Header.Set("X-API-Key", mwKey)
+
+    resp, err := httpClient.Do(req)
+    if err != nil || resp.StatusCode != 200 {
+        sendError(w, "not found", http.StatusNotFound)
+        return
+    }
+    defer resp.Body.Close()
+
+    var result interface{}
+    json.NewDecoder(resp.Body).Decode(&result)
+    sendJSON(w, APIResponse{Success: true, Data: result}, http.StatusOK)
 }
 
 func recoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -1173,6 +1199,7 @@ func main() {
 	http.HandleFunc("/looksmax-analyze", recoverMiddleware(corsMiddleware(looksMaxAnalyzeHandler)))
 	http.HandleFunc("/chat", recoverMiddleware(corsMiddleware(authMiddleware(chatHandler))))
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
+	http.HandleFunc("/exercise-video", recoverMiddleware(corsMiddleware(exerciseVideoHandler)))
 	http.HandleFunc("/exercise-video", recoverMiddleware(corsMiddleware(exerciseVideoHandler)))
 
 	port := os.Getenv("PORT")
