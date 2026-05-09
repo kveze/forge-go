@@ -869,30 +869,7 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imgBytes, err := base64.StdEncoding.DecodeString(req.ImageBase64)
-	if err != nil {
-		sendError(w, "Некорректное фото", http.StatusBadRequest)
-		return
-	}
-
-
-
-
-
-	mimeType := "image/jpeg"
-	isJPEG := len(imgBytes) > 2 && imgBytes[0] == 0xFF && imgBytes[1] == 0xD8
-	isPNG := len(imgBytes) > 4 && string(imgBytes[1:4]) == "PNG"
-	isWEBP := len(imgBytes) > 12 && string(imgBytes[8:12]) == "WEBP"
-
-	if !isJPEG && !isPNG && !isWEBP {
-		sendError(w, "Поддерживаются только JPEG, PNG, WEBP", http.StatusBadRequest)
-		return
-	}
-	if isPNG {
-		mimeType = "image/png"
-	} else if isWEBP {
-		mimeType = "image/webp"
-	}
+	openRouterKey := os.Getenv("OPENROUTER_KEY")
 
 	systemText := `Ты научный looksmaxxer с реальным опытом. Сначала проверь — есть ли на фото лицо человека.
 Анализируй лицо на фото и давай конкретные советы.
@@ -901,17 +878,29 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 Если лицо есть — дай 3 конкретных looksmax совета.
 Верни ТОЛЬКО JSON без markdown: {"tips": ["совет 1", "совет 2", "совет 3"], "priority": "высокий", "category": "лицо"}`
 
-	openRouterKey := os.Getenv("OPENROUTER_KEY")
+	userText := fmt.Sprintf(`Возраст: %d, пол: %s, цель: %s. Дай 3 конкретных looksmax совета по этому лицу.`,
+		req.Age, req.Gender, req.Goal)
 
-requestBody := map[string]interface{}{
-    "version": "zsxkib/instant-id:latest",
-    "input": map[string]interface{}{
-        "image":          fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
-        "prompt":         prompt,
-        "negative_prompt": "ugly, deformed, disfigured",
-        "num_outputs":    1,
-    },
-}
+	requestBody := map[string]interface{}{
+		"model": "google/gemma-4-31b-it:free",
+		"messages": []map[string]interface{}{
+			{
+				"role": "user",
+				"content": []map[string]interface{}{
+					{
+						"type": "text",
+						"text": systemText + "\n\n" + userText,
+					},
+					{
+						"type": "image_url",
+						"image_url": map[string]string{
+							"url": fmt.Sprintf("data:image/jpeg;base64,%s", req.ImageBase64),
+						},
+					},
+				},
+			},
+		},
+	}
 
 	jsonBody, _ := json.Marshal(requestBody)
 
@@ -969,7 +958,6 @@ requestBody := map[string]interface{}{
 
 	sendJSON(w, APIResponse{Success: true, Data: analysis}, http.StatusOK)
 }
-
 // ==================== LOOKSMAX TRANSFORM ====================
 
 func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
