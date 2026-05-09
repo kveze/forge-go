@@ -1013,7 +1013,7 @@ func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
 	fw, _ := mw.CreateFormFile("image", "photo.jpg")
 	fw.Write(imgBytes)
 
-	mw.WriteField("model", "gpt-image-1")
+	mw.WriteField("model", "gpt-image-2")
 	mw.WriteField("prompt", prompt)
 	mw.WriteField("size", "1024x1024")
 	mw.WriteField("response_format", "b64_json")
