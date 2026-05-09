@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 	"image/png"
- 	"image/jpeg"
 	"image"
 )
 
