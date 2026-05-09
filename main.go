@@ -876,6 +876,19 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	img, _, err := image.Decode(bytes.NewReader(imgBytes))
+if err != nil {
+    sendError(w, "Ошибка декодирования изображения", http.StatusBadRequest)
+    return
+}
+
+var pngBuf bytes.Buffer
+if err := png.Encode(&pngBuf, img); err != nil {
+    sendError(w, "Ошибка конвертации в PNG", http.StatusBadRequest)
+    return
+}
+imgBytes = pngBuf.Bytes()
+
 	mimeType := "image/jpeg"
 	isJPEG := len(imgBytes) > 2 && imgBytes[0] == 0xFF && imgBytes[1] == 0xD8
 	isPNG := len(imgBytes) > 4 && string(imgBytes[1:4]) == "PNG"
@@ -1010,8 +1023,8 @@ func looksMaxTransformHandler(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
-	fw, _ := mw.CreateFormFile("image", "photo.jpg")
-	fw.Write(imgBytes)
+fw, _ := mw.CreateFormFile("image", "photo.png")
+fw.Write(imgBytes)
 
 	mw.WriteField("model", "dall-e-2")
 	mw.WriteField("prompt", prompt)
