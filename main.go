@@ -1232,7 +1232,8 @@ func main() {
 	http.HandleFunc("/chat", recoverMiddleware(corsMiddleware(authMiddleware(chatHandler))))
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
 	http.HandleFunc("/exercise-video", recoverMiddleware(corsMiddleware(exerciseVideoHandler)))
-
+	http.HandleFunc("/stream-video", recoverMiddleware(corsMiddleware(streamVideoHandler)))
+	
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
