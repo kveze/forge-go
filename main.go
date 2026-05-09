@@ -875,18 +875,9 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	img, _, err := image.Decode(bytes.NewReader(imgBytes))
-if err != nil {
-    sendError(w, "Ошибка декодирования изображения", http.StatusBadRequest)
-    return
-}
 
-var pngBuf bytes.Buffer
-if err := png.Encode(&pngBuf, img); err != nil {
-    sendError(w, "Ошибка конвертации в PNG", http.StatusBadRequest)
-    return
-}
-imgBytes = pngBuf.Bytes()
+
+
 
 	mimeType := "image/jpeg"
 	isJPEG := len(imgBytes) > 2 && imgBytes[0] == 0xFF && imgBytes[1] == 0xD8
