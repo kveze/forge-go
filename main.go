@@ -307,7 +307,7 @@ func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
     defer searchResp.Body.Close()
 
 	body, _ := io.ReadAll(searchResp.Body)
-body, _ := io.ReadAll(searchResp.Body)
+searchResp, err = httpClient.Do(searchReq)
 log.Printf("MuscleWiki search response: %s", string(body))
 
 var searchResult struct {
