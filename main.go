@@ -15,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"net/url"
 )
 
 // ==================== СТРУКТУРЫ ====================
@@ -285,122 +284,6 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func exerciseVideoHandler(w http.ResponseWriter, r *http.Request) {
-    name := r.URL.Query().Get("name")
-    if name == "" {
-        sendError(w, "Нет названия", http.StatusBadRequest)
-        return
-    }
-
-    mwKey := os.Getenv("MUSCLEWIKI_KEY")
-
-    // 1. Ищем упражнение по названию
-    searchReq, _ := http.NewRequest("GET",
-        "https://api.musclewiki.com/search?q="+url.QueryEscape(name)+"&limit=1", nil)
-    searchReq.Header.Set("X-API-Key", mwKey)
-
-    searchResp, err := httpClient.Do(searchReq)
-    if err != nil || searchResp.StatusCode != 200 {
-        sendError(w, "not found", http.StatusNotFound)
-        return
-    }
-    defer searchResp.Body.Close()
-
-	body, _ := io.ReadAll(searchResp.Body)
-searchResp, err = httpClient.Do(searchReq)
-log.Printf("MuscleWiki search response: %s", string(body))
-
-var searchResult struct {
-    Results []struct {
-        ID   int    `json:"id"`
-        Name string `json:"name"`
-    } `json:"results"`
-}
-json.Unmarshal(body, &searchResult)
-
-    if len(searchResult.Results) == 0 {
-        sendError(w, "not found", http.StatusNotFound)
-        return
-    }
-
-    exerciseID := searchResult.Results[0].ID
-
-    // 2. Получаем детали упражнения с видео
-    detailReq, _ := http.NewRequest("GET",
-        fmt.Sprintf("https://api.musclewiki.com/exercises/%d", exerciseID), nil)
-    detailReq.Header.Set("X-API-Key", mwKey)
-
-    detailResp, err := httpClient.Do(detailReq)
-    if err != nil || detailResp.StatusCode != 200 {
-        sendError(w, "not found", http.StatusNotFound)
-        return
-    }
-    defer detailResp.Body.Close()
-
-    var exercise struct {
-        Videos []struct {
-            File   string `json:"file"`
-            Gender string `json:"gender"`
-        } `json:"videos"`
-    }
-    json.NewDecoder(detailResp.Body).Decode(&exercise)
-
-    // Берём первое мужское видео
-    videoFile := ""
-    for _, v := range exercise.Videos {
-        if v.Gender == "male" || videoFile == "" {
-            videoFile = v.File
-            if v.Gender == "male" { break }
-        }
-    }
-
-    if videoFile == "" {
-        sendError(w, "no video", http.StatusNotFound)
-        return
-    }
-
-    sendJSON(w, APIResponse{Success: true, Data: map[string]string{
-        "file": videoFile,
-        "stream_url": "https://forge-go-production.up.railway.app/stream-video?file=" + url.QueryEscape(videoFile),
-    }}, http.StatusOK)
-}
-
-// Стримим видео через бэк чтобы не светить API ключ
-func streamVideoHandler(w http.ResponseWriter, r *http.Request) {
-    file := r.URL.Query().Get("file")
-    if file == "" {
-        http.Error(w, "no file", 400)
-        return
-    }
-
-    mwKey := os.Getenv("MUSCLEWIKI_KEY")
-
-    req, _ := http.NewRequest("GET",
-        "https://api.musclewiki.com/stream/videos/branded/"+url.PathEscape(file), nil)
-    req.Header.Set("X-API-Key", mwKey)
-    // Передаём Range header для стриминга
-    if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
-        req.Header.Set("Range", rangeHeader)
-    }
-
-    resp, err := httpClient.Do(req)
-    if err != nil {
-        http.Error(w, "stream error", 500)
-        return
-    }
-    defer resp.Body.Close()
-
-    w.Header().Set("Content-Type", "video/mp4")
-    w.Header().Set("Accept-Ranges", "bytes")
-    if cr := resp.Header.Get("Content-Range"); cr != "" {
-        w.Header().Set("Content-Range", cr)
-    }
-    if cl := resp.Header.Get("Content-Length"); cl != "" {
-        w.Header().Set("Content-Length", cl)
-    }
-    w.WriteHeader(resp.StatusCode)
-    io.Copy(w, resp.Body)
-}
 
 func recoverMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1093,11 +976,14 @@ func looksMaxAnalyzeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	var geminiResp GeminiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
-		sendError(w, "Ошибка декодирования ответа Gemini", http.StatusInternalServerError)
-		return
-	}
+respBody, _ := io.ReadAll(resp.Body)
+log.Printf("Gemini status: %d, body: %s", resp.StatusCode, string(respBody))
+
+var geminiResp GeminiResponse
+if err := json.Unmarshal(respBody, &geminiResp); err != nil {
+    sendError(w, "Ошибка декодирования ответа Gemini", http.StatusInternalServerError)
+    return
+}
 
 	if len(geminiResp.Candidates) == 0 {
 		sendError(w, "Gemini не вернул ответ", http.StatusInternalServerError)
@@ -1235,10 +1121,7 @@ func main() {
 	http.HandleFunc("/looksmax-analyze", recoverMiddleware(corsMiddleware(looksMaxAnalyzeHandler)))
 	http.HandleFunc("/chat", recoverMiddleware(corsMiddleware(authMiddleware(chatHandler))))
 	http.HandleFunc("/looksmax-transform", recoverMiddleware(corsMiddleware(looksMaxTransformHandler)))
-	http.HandleFunc("/exercise-video", recoverMiddleware(corsMiddleware(exerciseVideoHandler)))
-	http.HandleFunc("/stream-video", recoverMiddleware(corsMiddleware(streamVideoHandler)))
-
-	port := os.Getenv("PORT")
+port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
